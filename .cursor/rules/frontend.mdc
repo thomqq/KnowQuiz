@@ -1,6 +1,6 @@
 ---
 description: 
-globs: *.tsx,*.astro
+globs: *tsx,*.astro
 alwaysApply: false
 ---
 ## Frontend
