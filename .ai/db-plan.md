@@ -4,10 +4,9 @@
 
 ### 1.1. Profiles
 ```sql
-CREATE TABLE profiles (
+CREATE TABLE public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
-    preferred_language VARCHAR(10) DEFAULT 'pl' CHECK (preferred_language IN ('pl', 'en')),
+    role user_role NOT NULL DEFAULT 'user',
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
@@ -21,30 +20,30 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_profiles_updated_at
-BEFORE UPDATE ON profiles
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON public.profiles
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
 -- Trigger do automatycznego tworzenia profilu po rejestracji użytkownika
-CREATE OR REPLACE FUNCTION handle_new_user()
+CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO profiles (id)
+    INSERT INTO public.profiles (id)
     VALUES (NEW.id);
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE TRIGGER on_auth_user_created
 AFTER INSERT ON auth.users
 FOR EACH ROW
-EXECUTE FUNCTION handle_new_user();
+EXECUTE FUNCTION public.handle_new_user();
 ```
 
 ### 1.2. Topics
 ```sql
-CREATE TABLE topics (
+CREATE TABLE public.topics (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
@@ -54,17 +53,17 @@ CREATE TABLE topics (
     UNIQUE(user_id, name)
 );
 
-CREATE TRIGGER update_topics_updated_at
-BEFORE UPDATE ON topics
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON public.topics
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 ```
 
 ### 1.3. Lessons
 ```sql
-CREATE TABLE lessons (
+CREATE TABLE public.lessons (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    topic_id UUID NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    topic_id UUID NOT NULL REFERENCES public.topics(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -72,85 +71,69 @@ CREATE TABLE lessons (
     UNIQUE(topic_id, name)
 );
 
-CREATE TRIGGER update_lessons_updated_at
-BEFORE UPDATE ON lessons
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON public.lessons
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 ```
 
 ### 1.4. Flashcards
 ```sql
-CREATE TABLE flashcards (
+CREATE TABLE public.flashcards (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    lesson_id UUID NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    lesson_id UUID NOT NULL REFERENCES public.lessons(id) ON DELETE CASCADE,
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
-    language VARCHAR(10) DEFAULT 'pl' CHECK (language IN ('pl', 'en')),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
-CREATE TRIGGER update_flashcards_updated_at
-BEFORE UPDATE ON flashcards
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON public.flashcards
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 ```
 
 ### 1.5. Learning_Status
 ```sql
-CREATE TABLE learning_status (
+CREATE TABLE public.learning_status (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    flashcard_id UUID NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
+    flashcard_id UUID NOT NULL REFERENCES public.flashcards(id) ON DELETE CASCADE,
     is_learned BOOLEAN NOT NULL DEFAULT false,
-    last_reviewed_at TIMESTAMP WITH TIME ZONE,
+    last_reviewed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     UNIQUE(user_id, flashcard_id)
 );
 
-CREATE TRIGGER update_learning_status_updated_at
-BEFORE UPDATE ON learning_status
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON public.learning_status
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 ```
 
 ### 1.6. Learning_Sessions
 ```sql
-CREATE TABLE learning_sessions (
+CREATE TABLE public.learning_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    lesson_id UUID NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    lesson_id UUID NOT NULL REFERENCES public.lessons(id) ON DELETE CASCADE,
     started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     ended_at TIMESTAMP WITH TIME ZONE,
     cards_reviewed INTEGER NOT NULL DEFAULT 0,
     cards_learned INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
-CREATE TRIGGER update_learning_sessions_updated_at
-BEFORE UPDATE ON learning_sessions
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON public.learning_sessions
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 ```
 
-### 1.7. Session_Details
+### 1.7. OpenAI_Logs
 ```sql
-CREATE TABLE session_details (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID NOT NULL REFERENCES learning_sessions(id) ON DELETE CASCADE,
-    flashcard_id UUID NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
-    user_answer TEXT,
-    is_correct BOOLEAN,
-    marked_as_learned BOOLEAN,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
-```
-
-### 1.8. OpenAI_Logs
-```sql
-CREATE TABLE openai_logs (
+CREATE TABLE public.openai_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     operation_type VARCHAR(50) NOT NULL CHECK (operation_type IN ('generate_answer', 'check_answer', 'text_to_speech', 'speech_to_text')),
@@ -164,272 +147,178 @@ CREATE TABLE openai_logs (
 );
 ```
 
-## 2. Indeksy
+## 2. Typy danych
 
 ```sql
--- Indeksy dla tabeli profiles
-CREATE INDEX idx_profiles_role ON profiles(role);
-
--- Indeksy dla tabeli topics
-CREATE INDEX idx_topics_user_id ON topics(user_id);
-CREATE INDEX idx_topics_name ON topics(name);
-CREATE INDEX idx_topics_created_at ON topics(created_at);
-
--- Indeksy dla tabeli lessons
-CREATE INDEX idx_lessons_topic_id ON lessons(topic_id);
-CREATE INDEX idx_lessons_name ON lessons(name);
-CREATE INDEX idx_lessons_created_at ON lessons(created_at);
-
--- Indeksy dla tabeli flashcards
-CREATE INDEX idx_flashcards_lesson_id ON flashcards(lesson_id);
-CREATE INDEX idx_flashcards_created_at ON flashcards(created_at);
-CREATE INDEX idx_flashcards_language ON flashcards(language);
-
--- Indeksy dla tabeli learning_status
-CREATE INDEX idx_learning_status_user_id ON learning_status(user_id);
-CREATE INDEX idx_learning_status_flashcard_id ON learning_status(flashcard_id);
-CREATE INDEX idx_learning_status_is_learned ON learning_status(is_learned);
-CREATE INDEX idx_learning_status_last_reviewed_at ON learning_status(last_reviewed_at);
-CREATE INDEX idx_learning_status_user_id_is_learned ON learning_status(user_id, is_learned);
-
--- Indeksy dla tabeli learning_sessions
-CREATE INDEX idx_learning_sessions_user_id ON learning_sessions(user_id);
-CREATE INDEX idx_learning_sessions_lesson_id ON learning_sessions(lesson_id);
-CREATE INDEX idx_learning_sessions_started_at ON learning_sessions(started_at);
-
--- Indeksy dla tabeli session_details
-CREATE INDEX idx_session_details_session_id ON session_details(session_id);
-CREATE INDEX idx_session_details_flashcard_id ON session_details(flashcard_id);
-CREATE INDEX idx_session_details_is_correct ON session_details(is_correct);
-
--- Indeksy dla tabeli openai_logs
-CREATE INDEX idx_openai_logs_user_id ON openai_logs(user_id);
-CREATE INDEX idx_openai_logs_operation_type ON openai_logs(operation_type);
-CREATE INDEX idx_openai_logs_created_at ON openai_logs(created_at);
-CREATE INDEX idx_openai_logs_status ON openai_logs(status);
+-- Typy wyliczeniowe
+CREATE TYPE user_role AS ENUM ('user', 'admin');
 ```
 
-## 3. Row-Level Security (RLS)
+## 3. Indeksy
 
 ```sql
--- Włączenie RLS dla tabel
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE topics ENABLE ROW LEVEL SECURITY;
-ALTER TABLE lessons ENABLE ROW LEVEL SECURITY;
-ALTER TABLE flashcards ENABLE ROW LEVEL SECURITY;
-ALTER TABLE learning_status ENABLE ROW LEVEL SECURITY;
-ALTER TABLE learning_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE session_details ENABLE ROW LEVEL SECURITY;
-ALTER TABLE openai_logs ENABLE ROW LEVEL SECURITY;
-
--- Polityki dla tabeli profiles
-CREATE POLICY profiles_self_access ON profiles
-    FOR ALL
-    TO authenticated
-    USING (id = auth.uid() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'));
-
--- Polityki dla tabeli topics
-CREATE POLICY topics_user_access ON topics
-    FOR ALL
-    TO authenticated
-    USING (user_id = auth.uid() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'));
-
--- Polityki dla tabeli lessons
-CREATE POLICY lessons_user_access ON lessons
-    FOR ALL
-    TO authenticated
-    USING (EXISTS (SELECT 1 FROM topics WHERE topics.id = topic_id AND (topics.user_id = auth.uid() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'))));
-
--- Polityki dla tabeli flashcards
-CREATE POLICY flashcards_user_access ON flashcards
-    FOR ALL
-    TO authenticated
-    USING (EXISTS (
-        SELECT 1 FROM lessons 
-        JOIN topics ON lessons.topic_id = topics.id 
-        WHERE flashcards.lesson_id = lessons.id AND (topics.user_id = auth.uid() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'))
-    ));
-
--- Polityki dla tabeli learning_status
-CREATE POLICY learning_status_user_access ON learning_status
-    FOR ALL
-    TO authenticated
-    USING (user_id = auth.uid() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'));
-
--- Polityki dla tabeli learning_sessions
-CREATE POLICY learning_sessions_user_access ON learning_sessions
-    FOR ALL
-    TO authenticated
-    USING (user_id = auth.uid() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'));
-
--- Polityki dla tabeli session_details
-CREATE POLICY session_details_user_access ON session_details
-    FOR ALL
-    TO authenticated
-    USING (EXISTS (
-        SELECT 1 FROM learning_sessions 
-        WHERE session_details.session_id = learning_sessions.id AND (learning_sessions.user_id = auth.uid() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'))
-    ));
-
--- Polityki dla tabeli openai_logs
-CREATE POLICY openai_logs_user_access ON openai_logs
-    FOR ALL
-    TO authenticated
-    USING (user_id = auth.uid() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'));
+-- Indeksy dla poprawy wydajności zapytań
+CREATE INDEX profiles_role_idx ON public.profiles(role);
+CREATE INDEX topics_user_id_idx ON public.topics(user_id);
+CREATE INDEX lessons_topic_id_idx ON public.lessons(topic_id);
+CREATE INDEX flashcards_lesson_id_idx ON public.flashcards(lesson_id);
+CREATE INDEX learning_status_user_id_idx ON public.learning_status(user_id);
+CREATE INDEX learning_status_flashcard_id_idx ON public.learning_status(flashcard_id);
+CREATE INDEX learning_status_is_learned_idx ON public.learning_status(is_learned);
+CREATE INDEX learning_status_last_reviewed_at_idx ON public.learning_status(last_reviewed_at);
+CREATE INDEX learning_sessions_user_id_idx ON public.learning_sessions(user_id);
+CREATE INDEX learning_sessions_lesson_id_idx ON public.learning_sessions(lesson_id);
+CREATE INDEX openai_logs_user_id_idx ON public.openai_logs(user_id);
+CREATE INDEX openai_logs_created_at_idx ON public.openai_logs(created_at);
 ```
 
-## 4. Przydatne widoki
+## 4. Funkcje i triggery
+
+### 4.1. Aktualizacja pola updated_at
 
 ```sql
--- Widok do statystyk użytkownika dla każdej lekcji
-CREATE VIEW user_lesson_stats AS
-SELECT 
-    u.id AS user_id,
-    l.id AS lesson_id,
-    t.id AS topic_id,
-    t.name AS topic_name,
-    l.name AS lesson_name,
-    COUNT(f.id) AS total_flashcards,
-    COUNT(ls.id) FILTER (WHERE ls.is_learned = true) AS learned_flashcards,
-    MAX(ls.last_reviewed_at) AS last_reviewed_at,
-    COUNT(DISTINCT s.id) AS total_sessions,
-    SUM(s.cards_reviewed) AS total_cards_reviewed
-FROM 
-    auth.users u
-JOIN 
-    topics t ON t.user_id = u.id
-JOIN 
-    lessons l ON l.topic_id = t.id
-LEFT JOIN 
-    flashcards f ON f.lesson_id = l.id
-LEFT JOIN 
-    learning_status ls ON ls.flashcard_id = f.id AND ls.user_id = u.id
-LEFT JOIN 
-    learning_sessions s ON s.lesson_id = l.id AND s.user_id = u.id
-GROUP BY 
-    u.id, l.id, t.id;
-
--- Widok do wyboru fiszek do nauki (uwzględniający algorytm)
-CREATE VIEW flashcards_to_review AS
-SELECT 
-    ls.user_id,
-    f.id AS flashcard_id,
-    f.question,
-    f.answer,
-    f.lesson_id,
-    l.topic_id,
-    ls.is_learned,
-    ls.last_reviewed_at,
-    CASE 
-        WHEN ls.is_learned = false THEN 1
-        WHEN ls.last_reviewed_at IS NULL THEN 2
-        ELSE EXTRACT(EPOCH FROM (NOW() - ls.last_reviewed_at)) / 86400 -- dni od ostatniego przeglądu
-    END AS priority_score
-FROM 
-    flashcards f
-JOIN 
-    lessons l ON f.lesson_id = l.id
-JOIN 
-    learning_status ls ON ls.flashcard_id = f.id
-WHERE 
-    ls.is_learned = false OR ls.last_reviewed_at < NOW() - INTERVAL '7 days'
-ORDER BY 
-    ls.user_id, priority_score DESC;
-
--- Zmaterializowany widok dla raportów administratora
-CREATE MATERIALIZED VIEW admin_usage_stats AS
-SELECT 
-    DATE_TRUNC('day', u.created_at) AS day,
-    COUNT(DISTINCT u.id) AS new_users,
-    COUNT(DISTINCT s.id) AS learning_sessions,
-    SUM(s.cards_reviewed) AS total_cards_reviewed,
-    SUM(s.cards_learned) AS total_cards_learned,
-    COUNT(DISTINCT t.id) AS new_topics,
-    COUNT(DISTINCT l.id) AS new_lessons,
-    COUNT(DISTINCT f.id) AS new_flashcards,
-    COUNT(DISTINCT o.id) AS openai_api_calls,
-    SUM(o.tokens_used) AS total_tokens_used,
-    SUM(o.cost) AS total_api_cost
-FROM 
-    auth.users u
-LEFT JOIN 
-    learning_sessions s ON s.user_id = u.id AND DATE_TRUNC('day', s.created_at) = DATE_TRUNC('day', u.created_at)
-LEFT JOIN 
-    topics t ON t.user_id = u.id AND DATE_TRUNC('day', t.created_at) = DATE_TRUNC('day', u.created_at)
-LEFT JOIN 
-    lessons l ON l.topic_id = t.id AND DATE_TRUNC('day', l.created_at) = DATE_TRUNC('day', u.created_at)
-LEFT JOIN 
-    flashcards f ON f.lesson_id = l.id AND DATE_TRUNC('day', f.created_at) = DATE_TRUNC('day', u.created_at)
-LEFT JOIN 
-    openai_logs o ON o.user_id = u.id AND DATE_TRUNC('day', o.created_at) = DATE_TRUNC('day', u.created_at)
-GROUP BY 
-    DATE_TRUNC('day', u.created_at)
-ORDER BY 
-    DATE_TRUNC('day', u.created_at);
-
--- Indeks dla zmaterializowanego widoku
-CREATE UNIQUE INDEX idx_admin_usage_stats_day ON admin_usage_stats(day);
-```
-
-## 5. Funkcje i procedury
-
-```sql
--- Funkcja do inicjowania statusu nauki dla nowej fiszki
-CREATE OR REPLACE FUNCTION initialize_learning_status() 
+-- Funkcja do automatycznej aktualizacji pola updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO learning_status (user_id, flashcard_id, is_learned, last_reviewed_at)
-    SELECT 
-        u.id,
-        NEW.id,
-        false,
-        NULL
-    FROM 
-        auth.users u
-    ON CONFLICT (user_id, flashcard_id) DO NOTHING;
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Triggery dla aktualizacji pola updated_at
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON public.profiles
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON public.topics
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON public.lessons
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON public.flashcards
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+```
+
+### 4.2. Tworzenie profilu użytkownika
+
+```sql
+-- Funkcja do automatycznego tworzenia profilu po rejestracji użytkownika
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.profiles (id)
+    VALUES (NEW.id);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger tworzący profil po rejestracji użytkownika
+CREATE TRIGGER on_auth_user_created
+AFTER INSERT ON auth.users
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_new_user();
+```
+
+### 4.3. Aktualizacja roli administratora w JWT
+
+```sql
+-- Funkcja do aktualizacji roli administratora w JWT claims
+CREATE OR REPLACE FUNCTION public.handle_admin_update()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.role = 'admin' AND (OLD.role IS NULL OR OLD.role <> 'admin') THEN
+        UPDATE auth.users SET raw_app_meta_data = 
+            raw_app_meta_data || json_build_object('role', 'admin')::jsonb
+            WHERE id = NEW.id;
+    ELSIF NEW.role = 'user' AND OLD.role = 'admin' THEN
+        UPDATE auth.users SET raw_app_meta_data = 
+            raw_app_meta_data - 'role'
+            WHERE id = NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger aktualizujący JWT claims po zmianie roli
+CREATE TRIGGER on_admin_role_update
+AFTER UPDATE OF role ON public.profiles
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_admin_update();
+```
+
+### 4.4. Inicjalizacja statusu nauki dla nowej fiszki
+
+```sql
+-- Funkcja do inicjalizacji statusu nauki dla nowej fiszki
+CREATE OR REPLACE FUNCTION create_learning_status_for_new_flashcard()
+RETURNS TRIGGER AS $$
+DECLARE
+    creator_id UUID;
+BEGIN
+    -- Find the user_id of the topic owner
+    SELECT topics.user_id INTO creator_id
+    FROM public.lessons
+    JOIN public.topics ON lessons.topic_id = topics.id
+    WHERE lessons.id = NEW.lesson_id;
+    
+    -- Create learning_status entry for the creator
+    INSERT INTO public.learning_status (user_id, flashcard_id)
+    VALUES (creator_id, NEW.id);
     
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger dla nowych fiszek
-CREATE TRIGGER new_flashcard_learning_status
-AFTER INSERT ON flashcards
+-- Trigger tworzący status nauki po dodaniu fiszki
+CREATE TRIGGER create_learning_status_after_flashcard_insert
+AFTER INSERT ON public.flashcards
 FOR EACH ROW
-EXECUTE FUNCTION initialize_learning_status();
+EXECUTE FUNCTION create_learning_status_for_new_flashcard();
+```
 
--- Funkcja do zakończenia sesji nauki
-CREATE OR REPLACE FUNCTION end_learning_session(session_id UUID)
-RETURNS VOID AS $$
-DECLARE
-    learned_count INTEGER;
+### 4.5. Aktualizacja czasu ostatniego przeglądu
+
+```sql
+-- Funkcja do aktualizacji czasu ostatniego przeglądu fiszki
+CREATE OR REPLACE FUNCTION update_last_reviewed_at()
+RETURNS TRIGGER AS $$
 BEGIN
-    -- Ustawienie czasu zakończenia sesji
-    UPDATE learning_sessions
-    SET 
-        ended_at = NOW(),
-        cards_learned = (
-            SELECT COUNT(*) 
-            FROM session_details 
-            WHERE session_id = end_learning_session.session_id AND marked_as_learned = true
-        )
-    WHERE id = session_id;
+    NEW.last_reviewed_at = NOW();
+    RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Funkcja do wyboru fiszek do nauki
-CREATE OR REPLACE FUNCTION get_flashcards_for_learning(
-    p_user_id UUID,
+-- Trigger aktualizujący czas ostatniego przeglądu
+CREATE TRIGGER update_last_reviewed_at_on_learning_status
+BEFORE UPDATE OF is_learned ON public.learning_status
+FOR EACH ROW
+EXECUTE FUNCTION update_last_reviewed_at();
+```
+
+### 4.6. Funkcja wybierająca fiszki do nauki
+
+```sql
+-- Funkcja do wybierania fiszek do nauki
+CREATE OR REPLACE FUNCTION select_flashcards_for_learning(
     p_lesson_id UUID,
+    p_user_id UUID,
     p_limit INTEGER DEFAULT 10
 )
 RETURNS TABLE (
-    flashcard_id UUID,
+    id UUID,
     question TEXT,
     answer TEXT,
     is_learned BOOLEAN,
-    last_reviewed_at TIMESTAMP WITH TIME ZONE,
-    priority_score FLOAT
+    last_reviewed_at TIMESTAMP WITH TIME ZONE
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -438,23 +327,314 @@ BEGIN
         f.question,
         f.answer,
         ls.is_learned,
-        ls.last_reviewed_at,
-        CASE 
-            WHEN ls.is_learned = false THEN 1
-            WHEN ls.last_reviewed_at IS NULL THEN 2
-            ELSE EXTRACT(EPOCH FROM (NOW() - ls.last_reviewed_at)) / 86400 -- dni od ostatniego przeglądu
-        END AS priority_score
+        ls.last_reviewed_at
     FROM 
-        flashcards f
+        public.flashcards f
     JOIN 
-        learning_status ls ON ls.flashcard_id = f.id AND ls.user_id = p_user_id
+        public.learning_status ls ON f.id = ls.flashcard_id
     WHERE 
         f.lesson_id = p_lesson_id
+        AND ls.user_id = p_user_id
     ORDER BY 
-        priority_score DESC
+        ls.is_learned ASC,
+        ls.last_reviewed_at ASC
     LIMIT p_limit;
 END;
 $$ LANGUAGE plpgsql;
+```
+
+## 5. Row-Level Security (RLS)
+
+### 5.1. Włączenie RLS dla wszystkich tabel
+
+```sql
+-- Włączenie RLS dla wszystkich tabel
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.topics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.lessons ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.flashcards ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.learning_status ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.learning_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.openai_logs ENABLE ROW LEVEL SECURITY;
+```
+
+### 5.2. Polityki RLS dla profiles
+
+```sql
+-- Polityki RLS dla tabeli profiles
+CREATE POLICY "Admins can see all profiles"
+    ON public.profiles
+    FOR SELECT
+    TO authenticated
+    USING (auth.jwt() ->> 'role' = 'admin');
+
+CREATE POLICY "Users can see their own profile"
+    ON public.profiles
+    FOR SELECT
+    TO authenticated
+    USING (auth.uid() = id);
+
+CREATE POLICY "Users can update their own profile"
+    ON public.profiles
+    FOR UPDATE
+    TO authenticated
+    USING (auth.uid() = id);
+```
+
+### 5.3. Polityki RLS dla topics
+
+```sql
+-- Polityki RLS dla tabeli topics
+CREATE POLICY "Admins can see all topics"
+    ON public.topics
+    FOR SELECT
+    TO authenticated
+    USING (auth.jwt() ->> 'role' = 'admin');
+
+CREATE POLICY "Users can see their own topics"
+    ON public.topics
+    FOR SELECT
+    TO authenticated
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own topics"
+    ON public.topics
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own topics"
+    ON public.topics
+    FOR UPDATE
+    TO authenticated
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own topics"
+    ON public.topics
+    FOR DELETE
+    TO authenticated
+    USING (auth.uid() = user_id);
+```
+
+### 5.4. Polityki RLS dla lessons
+
+```sql
+-- Polityki RLS dla tabeli lessons
+CREATE POLICY "Admins can see all lessons"
+    ON public.lessons
+    FOR SELECT
+    TO authenticated
+    USING (auth.jwt() ->> 'role' = 'admin');
+
+CREATE POLICY "Users can see their own lessons"
+    ON public.lessons
+    FOR SELECT
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.topics
+            WHERE topics.id = lessons.topic_id
+            AND topics.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Users can insert lessons into their own topics"
+    ON public.lessons
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.topics
+            WHERE topics.id = lessons.topic_id
+            AND topics.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Users can update their own lessons"
+    ON public.lessons
+    FOR UPDATE
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.topics
+            WHERE topics.id = lessons.topic_id
+            AND topics.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Users can delete their own lessons"
+    ON public.lessons
+    FOR DELETE
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.topics
+            WHERE topics.id = lessons.topic_id
+            AND topics.user_id = auth.uid()
+        )
+    );
+```
+
+### 5.5. Polityki RLS dla flashcards
+
+```sql
+-- Polityki RLS dla tabeli flashcards
+CREATE POLICY "Admins can see all flashcards"
+    ON public.flashcards
+    FOR SELECT
+    TO authenticated
+    USING (auth.jwt() ->> 'role' = 'admin');
+
+CREATE POLICY "Users can see their own flashcards"
+    ON public.flashcards
+    FOR SELECT
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.lessons
+            JOIN public.topics ON lessons.topic_id = topics.id
+            WHERE flashcards.lesson_id = lessons.id
+            AND topics.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Users can insert flashcards into their own lessons"
+    ON public.flashcards
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.lessons
+            JOIN public.topics ON lessons.topic_id = topics.id
+            WHERE flashcards.lesson_id = lessons.id
+            AND topics.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Users can update their own flashcards"
+    ON public.flashcards
+    FOR UPDATE
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.lessons
+            JOIN public.topics ON lessons.topic_id = topics.id
+            WHERE flashcards.lesson_id = lessons.id
+            AND topics.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Users can delete their own flashcards"
+    ON public.flashcards
+    FOR DELETE
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.lessons
+            JOIN public.topics ON lessons.topic_id = topics.id
+            WHERE flashcards.lesson_id = lessons.id
+            AND topics.user_id = auth.uid()
+        )
+    );
+```
+
+### 5.6. Polityki RLS dla learning_status
+
+```sql
+-- Polityki RLS dla tabeli learning_status
+CREATE POLICY "Admins can see all learning statuses"
+    ON public.learning_status
+    FOR SELECT
+    TO authenticated
+    USING (auth.jwt() ->> 'role' = 'admin');
+
+CREATE POLICY "Users can see their own learning statuses"
+    ON public.learning_status
+    FOR SELECT
+    TO authenticated
+    USING (user_id = auth.uid());
+
+CREATE POLICY "Users can insert their own learning statuses"
+    ON public.learning_status
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can update their own learning statuses"
+    ON public.learning_status
+    FOR UPDATE
+    TO authenticated
+    USING (user_id = auth.uid());
+
+CREATE POLICY "Users can delete their own learning statuses"
+    ON public.learning_status
+    FOR DELETE
+    TO authenticated
+    USING (user_id = auth.uid());
+```
+
+### 5.7. Polityki RLS dla learning_sessions
+
+```sql
+-- Polityki RLS dla tabeli learning_sessions
+CREATE POLICY "Admins can see all learning sessions"
+    ON public.learning_sessions
+    FOR SELECT
+    TO authenticated
+    USING (auth.jwt() ->> 'role' = 'admin');
+
+CREATE POLICY "Users can see their own learning sessions"
+    ON public.learning_sessions
+    FOR SELECT
+    TO authenticated
+    USING (user_id = auth.uid());
+
+CREATE POLICY "Users can insert their own learning sessions"
+    ON public.learning_sessions
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can update their own learning sessions"
+    ON public.learning_sessions
+    FOR UPDATE
+    TO authenticated
+    USING (user_id = auth.uid());
+
+CREATE POLICY "Users can delete their own learning sessions"
+    ON public.learning_sessions
+    FOR DELETE
+    TO authenticated
+    USING (user_id = auth.uid());
+```
+
+### 5.8. Polityki RLS dla openai_logs
+
+```sql
+-- Polityki RLS dla tabeli openai_logs
+CREATE POLICY "Admins can see all openai logs"
+    ON public.openai_logs
+    FOR SELECT
+    TO authenticated
+    USING (auth.jwt() ->> 'role' = 'admin');
+
+CREATE POLICY "Users can see their own openai logs"
+    ON public.openai_logs
+    FOR SELECT
+    TO authenticated
+    USING (user_id = auth.uid());
+
+CREATE POLICY "Only admins can delete openai logs"
+    ON public.openai_logs
+    FOR DELETE
+    TO authenticated
+    USING (auth.jwt() ->> 'role' = 'admin');
+
+CREATE POLICY "Users can insert their own openai logs"
+    ON public.openai_logs
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (user_id = auth.uid());
 ```
 
 ## 6. Relacje
@@ -465,36 +645,33 @@ $$ LANGUAGE plpgsql;
 3. Lesson (1) -> Flashcards (N): Jedna lekcja może zawierać wiele fiszek
 4. User (1) -> Learning_Sessions (N): Jeden użytkownik może mieć wiele sesji nauki
 5. Lesson (1) -> Learning_Sessions (N): Jedna lekcja może być przedmiotem wielu sesji nauki
-6. Learning_Session (1) -> Session_Details (N): Jedna sesja nauki ma wiele szczegółów
-7. User (1) -> OpenAI_Logs (N): Jeden użytkownik może generować wiele logów API
-
-### Relacje wiele-do-jednego (N:1):
-1. Wszystkie relacje jeden-do-wielu są również relacjami wiele-do-jednego z perspektywy tabeli "wielu"
+6. User (1) -> OpenAI_Logs (N): Jeden użytkownik może generować wiele logów API
 
 ### Relacje jeden-do-jednego (1:1):
 1. User-Flashcard -> Learning_Status: Dla każdej kombinacji użytkownika i fiszki istnieje jeden rekord statusu nauki
 
 ## 7. Ograniczenia i walidacje
 
-Ograniczenia są zdefiniowane w definicjach tabel, ale warto podkreślić:
+W schemacie bazy danych zastosowano następujące ograniczenia:
 
-1. Unikalność adresu email użytkownika: `UNIQUE(email)` w tabeli `users`
+1. Powiązanie profiles z auth.users poprzez klucz obcy
 2. Unikalność nazwy tematu dla użytkownika: `UNIQUE(user_id, name)` w tabeli `topics`
 3. Unikalność nazwy lekcji dla tematu: `UNIQUE(topic_id, name)` w tabeli `lessons`
 4. Unikalność kombinacji użytkownika i fiszki w statusie nauki: `UNIQUE(user_id, flashcard_id)` w tabeli `learning_status`
-5. Walidacja roli użytkownika: `CHECK (role IN ('user', 'admin'))` w tabeli `users`
-6. Walidacja typu operacji w logach OpenAI: `CHECK (operation_type IN ('generate_answer', 'check_answer', 'text_to_speech', 'speech_to_text'))` w tabeli `openai_logs`
-7. Walidacja statusu operacji w logach OpenAI: `CHECK (status IN ('success', 'error', 'timeout'))` w tabeli `openai_logs`
-8. Walidacja języka dla fiszek: `CHECK (language IN ('pl', 'en'))` w tabeli `flashcards`
+5. Walidacja roli użytkownika poprzez typ enum: `user_role` z wartościami 'user' i 'admin'
+6. Klucze obce z opcją `ON DELETE CASCADE` zapewniające integralność referencyjną
 
 ## 8. Dodatkowe uwagi
 
-1. Schemat wykorzystuje UUID jako klucze główne, co jest dobrą praktyką dla aplikacji webowych i zapewnia lepsze bezpieczeństwo.
-2. Uwierzytelnianie użytkowników jest zarządzane przez Supabase Auth, który dostarcza gotowy system rejestracji, logowania i zarządzania kontami.
-3. Dodatkowe informacje o użytkownikach są przechowywane w tabeli profiles, która jest połączona z tabelą auth.users.
-4. Row-Level Security (RLS) jest skonfigurowane tak, aby użytkownicy mieli dostęp tylko do swoich danych, a administratorzy do wszystkich.
-5. Indeksy są zdefiniowane dla kolumn często używanych w zapytaniach, co poprawia wydajność.
-6. Triggery automatycznie aktualizują pole `updated_at` przy każdej modyfikacji rekordu oraz tworzą profil użytkownika po rejestracji.
-7. Widoki i funkcje ułatwiają implementację złożonej logiki biznesowej, takiej jak algorytm wyboru fiszek do nauki.
-8. Zmaterializowane widoki są użyte do generowania raportów dla administratorów, co pozwala na efektywne uzyskiwanie statystyk bez obciążania bazy danych.
+1. Schemat wykorzystuje UUID jako klucze główne, co zapewnia lepsze bezpieczeństwo i łatwiejszą synchronizację danych.
+2. Uwierzytelnianie użytkowników jest zarządzane przez Supabase Auth.
+3. Row-Level Security (RLS) zapewnia, że użytkownicy mają dostęp tylko do własnych danych, a administratorzy do wszystkich.
+4. Automatyczne triggery zapewniają:
+   - Aktualizację pola updated_at przy każdej modyfikacji rekordu
+   - Tworzenie profilu po rejestracji użytkownika
+   - Aktualizację JWT claims przy zmianie roli użytkownika
+   - Inicjalizację statusu nauki dla nowych fiszek
+   - Aktualizację czasu ostatniego przeglądu fiszki
+5. Indeksy na często używanych polach zapewniają wysoką wydajność zapytań.
+6. System został zaprojektowany z myślą o skalowalności i bezpieczeństwie danych.
 ``` 
